@@ -3,6 +3,11 @@
 source ../etc/load_configs.sh
 set -eu
 
+##
+## !!! This is a modified version of the script to do per-machine scheduling right at this level.
+## The method is pretty flimsy and might break if we change the tasks in the scheduler.
+#### This is a copy of that previous script, butm odified for the metadata.
+
 if [ "$#" -lt 2 ]; then
     echo "Usage:"
     echo " $0 FILE JOB"
@@ -15,6 +20,12 @@ if [ "$#" -lt 2 ]; then
     echo -e "eeID\teeName\ttaxon\tsample"
     echo -e "-1\tGSE64978\trat\t10"
     exit -1
+fi
+
+PARALLEL_MACHINES=""
+if [ -n "$MACHINES" ]; then
+    echo "Using distributed mode on: $MACHINES"
+    PARALLEL_MACHINES=" -S $MACHINES "
 fi
 
 # TODO: 
@@ -32,17 +43,20 @@ OUTPUT="$LOGS/MultiScheduler/"$(basename $GEO_SAMPLES)
 echo "Writing logs in $OUTPUT"
 mkdir -p $(dirname $OUTPUT)
 
-#Pop out parsed arguments but keep the rest (e.g. --ignorecommit=1)
-shift
-shift
+GEMMAINFO=" --env GEMMAUSERNAME --env GEMMAPASSWORD --env GEMMACLI "
 
 echo "##================Launching new batch======================##"
-echo " Rate: $NTASKS tasks simultaneously. " # Default assumption is that each task takes 1/2 machine
+echo " Rate: $NTASKS tasks simultaneously. " 
 sed 's|\t| |g' $GEO_SAMPLES \
     | cut -d' ' -f2,3,4 \
     | tail -n +2 \
     | grep -v "^$" \
-    | parallel --jobs $NTASKS \
-               --colsep " " \
-               --progress \
-                ./schedule.sh "$JOB $MODES{2} --gse={1} --nsamples={3} $@" # 1>> $OUTPUT".out" 2>> $OUTPUT".err"
+    | grep -f <($ROOT_DIR/scheduler/progressReport.sh | grep -P "X\tX\tX\tX\t[_X]" | cut -f1) \
+    | parallel \
+        $PARALLEL_MACHINES \
+        $GEMMAINFO \
+        --jobs $NTASKS \
+        --colsep " " \
+        --progress \
+        --workdir $PWD \
+        $PWD/schedule.sh "$JOB $MODES{2} --gse={1} --nsamples={3}" 

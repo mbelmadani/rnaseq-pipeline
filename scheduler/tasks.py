@@ -21,6 +21,7 @@ class BaseTask(luigi.Task):
     nsamples = luigi.Parameter(default=0)
     scope = luigi.Parameter(default="genes")
     ignorecommit = luigi.Parameter(default=0)
+    allowsuper = luigi.Parameter(default=False)
     
 
 class QcGSE(BaseTask):
@@ -74,7 +75,6 @@ class QcGSE(BaseTask):
 class CountGSE(BaseTask):
 
     method = "./rsem_count.sh" # TODO: Generalize
-    #wd = "."
 
     def init(self):
         """
@@ -83,19 +83,19 @@ class CountGSE(BaseTask):
         if self.scope is None:
             self.scope = "genes"
             
-        quantDir = os.environ['QUANTDIR']
-        countDir = os.environ['COUNTDIR']
+        quantDir = os.environ['QUANTDIR'] + "/"
+        countDir = os.environ['COUNTDIR'] + "/"
+
 	if 'SCOPE' in  os.environ.keys():
             self.scope = os.environ['SCOPE']
 
-        try:
+        if not os.path.isdir(countDir):
             os.mkdir(countDir)
-        except:
-            pass # Dir must exists
 
         print "INFO: QUANTDIR => ", quantDir
         print "INFO: COUNTDIR => ", countDir
-        self.path_to_inputs = quantDir + "/"  +str(self.gse)+ "/"
+
+        self.path_to_inputs = quantDir + str(self.gse)+ "/"
 
         self.count_source = self.path_to_inputs + "countMatrix."+self.scope
         self.count_destination = countDir +str(self.gse)+ "_counts."+self.scope
@@ -112,7 +112,12 @@ class CountGSE(BaseTask):
         return ProcessGSE(self.gse, self.nsamples)
 
     def output(self):
-        return luigi.LocalTarget(self.commit_dir + "/count_%s.tsv" % self.gse)
+        uniqueID=""
+        if int(self.ignorecommit) == 1:
+            print "INFO: Ignoring previous commits."
+            uniqueID = "_" + str(uuid.uuid1()) # Skipping commit logic.
+            
+        return luigi.LocalTarget(self.commit_dir + "/count" + uniqueID + "_%s.tsv" % self.gse)
 
     def run(self):
 
@@ -167,6 +172,8 @@ class CheckGemmaGSE(BaseTask):
             self.method = os.getenv("GEMMACLI").split(" ")
             #self.method_args = ["addGEOData", "-u",  os.getenv("GEMMAUSERNAME"), "-p", os.getenv("GEMMAPASSWORD"), "-e", self.gse, "--allowsuper"]
             self.method_args = ["addGEOData", "-u",  os.getenv("GEMMAUSERNAME"), "-p", os.getenv("GEMMAPASSWORD"), "-e", self.gse]
+            if self.allowsuper:
+                self.method_args += ["--allowsuper"]
 
         except Exception as e:
             print "$GEMMACLI/GEMMAUSERNAME/GEMMPASSWORD appear to not all be set. Please set environment variables."
@@ -280,7 +287,12 @@ class LoadGemmaGSE(BaseTask):
         return CheckGemmaGSE(self.gse, self.nsamples)
 
     def output(self):
-        return luigi.LocalTarget(self.commit_dir + "/loadgemma_%s.tsv" % self.gse)
+        uniqueID=""
+        if int(self.ignorecommit) == 1:
+            print "INFO: Ignoring previous commits."
+            uniqueID = "_" + str(uuid.uuid1()) # Skipping commit logic.
+            
+        return luigi.LocalTarget(self.commit_dir + "/loadgemma" + uniqueID  + "_%s.tsv" % self.gse)
 
     def run(self):
         job = self.method + self.method_args
@@ -527,28 +539,29 @@ class ProcessGSE(BaseTask):
 
 class DownloadGSE(BaseTask):    
 
-    #method_geo = "../scripts/geo_to_sra.R" # TODO: Generalize
-    #method_geo = "/space/grp/Pipelines/rnaseq-pipeline/scripts/geo_to_sra.R" # TODO: Generalize
-    #method_arrayexpres = "/space/grp/Pipelines/rnaseq-pipeline/scripts/arrayexpress_to_fastq.R"
-    method_arrayexpress = "/space/grp/Pipelines/rnaseq-pipeline/scripts/arrayexpress_to_fastq.sh"
-    method_gse = "/space/grp/Pipelines/rnaseq-pipeline/scripts/GSE_to_fastq.sh"
+    method_arrayexpress = os.getenv('SCRIPTS') + "/arrayexpress_to_fastq.sh"
+    method_gse =  os.getenv('SCRIPTS') + "/GSE_to_fastq.sh"
     method = None
 
     GEO_TOKENS = ["GSE"]
 
     def output(self):
-        return luigi.LocalTarget(self.commit_dir + "/download_%s.tsv" % self.gse)
+        uniqueID = ""
+        if int(self.ignorecommit) == 1:
+            uuid_tag = str(uuid.uuid1())
+            print "INFO: Ignoring previous commits. Current job UUID tag:", uuid_tag
+            uniqueID = "_" + uuid_tag # Skipping commit logic.
+
+        return luigi.LocalTarget(self.commit_dir + "/download" +uniqueID+ "_%s.tsv" % self.gse)
 
     def run(self):
-        # TODO: Figure wheter to call the GEO or ArrayExpress script
+        # TODO: Figure wheter to call the GEO or ArrayExpress script more explicitely
         if any([ TOKEN in self.gse for TOKEN in self.GEO_TOKENS ]):
             self.method = self.method_gse
         else:
             self.method = self.method_arrayexpress
 
         # Call job
-        #job = ["Rscript", self.method, self.gse] 
-        #job = ['ssh', 'chalmers', 'cd', '/space/grp/Pipelines/rnaseq-pipeline/scripts/', '&&', "Rscript", self.method, self.gse]
         job = [self.method, self.gse]
         ret = call(job)
 
